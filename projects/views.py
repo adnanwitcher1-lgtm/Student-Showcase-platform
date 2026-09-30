@@ -12,6 +12,7 @@ from rest_framework.filters import OrderingFilter
 from django_filters.rest_framework import DjangoFilterBackend
 from django.core.files.storage import default_storage
 import boto3
+from botocore.config import Config
 from django.conf import settings
 from django.shortcuts import get_object_or_404
 
@@ -32,6 +33,7 @@ from .permissions import IsOwnerOrReadOnly, IsInstructorOrAdmin
 from .filters import ProjectFilter
 from .tasks import watermark_screenshot, deploy_static_site
 from .redis_utils import redis_client
+
 
 @method_decorator(ratelimit(key='user', rate='10/h', method='POST', block=True), name='create')
 class ProjectViewSet(viewsets.ModelViewSet):
@@ -228,6 +230,7 @@ class ProjectGitHubMetaView(APIView):
 
         return Response(serializer.data)
 
+
 @method_decorator(ratelimit(key='user_or_ip', rate='20/m', method='GET', block=True), name='get')
 class ProjectDemoUrlView(APIView):
     permission_classes = [permissions.AllowAny]
@@ -241,11 +244,15 @@ class ProjectDemoUrlView(APIView):
                 status=status.HTTP_404_NOT_FOUND
             )
 
+        # R2 ke liye region aur SigV4 signature zaroori hai.
+        # Local MinIO par region_name khali ho to 'us-east-1' use hota hai.
         s3_client = boto3.client(
             's3',
             endpoint_url=settings.AWS_S3_ENDPOINT_URL,
             aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
             aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+            region_name=settings.AWS_S3_REGION_NAME or 'us-east-1',
+            config=Config(signature_version='s3v4'),
         )
 
         signed_url = s3_client.generate_presigned_url(
@@ -403,6 +410,8 @@ class ProjectSourcePreviewView(APIView):
         response = Response(serializer.data)
         response['Content-Disposition'] = 'inline'
         return response
+
+
 class SentryTestView(APIView):
     permission_classes = [permissions.AllowAny]
 
