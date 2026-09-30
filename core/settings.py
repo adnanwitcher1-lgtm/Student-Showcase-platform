@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 from decouple import config
 from pathlib import Path
 from datetime import timedelta
+import dj_database_url
 import sentry_sdk
 from sentry_sdk.integrations.django import DjangoIntegration
 from celery.schedules import crontab
@@ -20,17 +21,17 @@ from celery.schedules import crontab
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
-# Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
-
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = config('SECRET_KEY')
-DEBUG = config('DEBUG', default=False, cast=bool)
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+# Local .env mein DEBUG=True likho, Render par DEBUG=False
+DEBUG = config('DEBUG', default=False, cast=bool)
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='127.0.0.1,localhost').split(',')
+CSRF_TRUSTED_ORIGINS = [
+    o for o in config('CSRF_TRUSTED_ORIGINS', default='').split(',') if o
+]
 
 
 # Application definition
@@ -63,6 +64,8 @@ AUTH_USER_MODEL = 'users.User'
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -71,7 +74,6 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'core.middleware.DemoOriginValidationMiddleware',
-    'corsheaders.middleware.CorsMiddleware',
     'django_prometheus.middleware.PrometheusAfterMiddleware',
 ]
 
@@ -98,16 +100,21 @@ WSGI_APPLICATION = 'core.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
+# Local: purani DB_* settings. Render: DATABASE_URL use hoga.
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': config('DB_NAME'),
-        'USER': config('DB_USER'),
-        'PASSWORD': config('DB_PASSWORD'),
-        'HOST': config('DB_HOST'),
-        'PORT': config('DB_PORT'),
+        'NAME': config('DB_NAME', default=''),
+        'USER': config('DB_USER', default=''),
+        'PASSWORD': config('DB_PASSWORD', default=''),
+        'HOST': config('DB_HOST', default=''),
+        'PORT': config('DB_PORT', default=''),
     }
 }
+
+DATABASE_URL = config('DATABASE_URL', default='')
+if DATABASE_URL:
+    DATABASES['default'] = dj_database_url.parse(DATABASE_URL, conn_max_age=600)
 
 
 # Password validation
@@ -163,6 +170,7 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / "staticfiles"
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
@@ -174,21 +182,28 @@ AUTHENTICATION_BACKENDS = [
 ]
 LOGIN_REDIRECT_URL = '/admin/'
 
-REDIS_HOST = config('REDIS_HOST', default='127.0.0.1')
+
+# Redis (cache + celery)
+# Render par REDIS_URL milta hai (redis://host:6379), local par REDIS_HOST use hota hai
+REDIS_URL = config('REDIS_URL', default='')
+if REDIS_URL:
+    _redis = REDIS_URL.rstrip('/')
+else:
+    _redis = f"redis://{config('REDIS_HOST', default='127.0.0.1')}:6379"
 
 CACHES = {
     'default': {
         'BACKEND': 'django_redis.cache.RedisCache',
-        'LOCATION': f'redis://{REDIS_HOST}:6379/1',
+        'LOCATION': f'{_redis}/1',
         'OPTIONS': {
             'CLIENT_CLASS': 'django_redis.client.DefaultClient',
         }
     }
 }
 
-CELERY_BROKER_URL = f'redis://{REDIS_HOST}:6379/0'
-CELERY_RESULT_BACKEND = f'redis://{REDIS_HOST}:6379/0'
-REDIS_COUNTER_URL = f'redis://{REDIS_HOST}:6379/2'
+CELERY_BROKER_URL = f'{_redis}/0'
+CELERY_RESULT_BACKEND = f'{_redis}/0'
+REDIS_COUNTER_URL = f'{_redis}/2'
 
 
 CELERY_ACCEPT_CONTENT = ['json']
@@ -207,46 +222,67 @@ CELERY_BEAT_SCHEDULE = {
     },
 }
 
-AWS_ACCESS_KEY_ID = config('MINIO_ACCESS_KEY')
-AWS_SECRET_ACCESS_KEY = config('MINIO_SECRET_KEY')
-AWS_STORAGE_BUCKET_NAME = config('MINIO_BUCKET_NAME')
-AWS_S3_ENDPOINT_URL = config('MINIO_ENDPOINT_URL')
-AWS_S3_ADDRESSING_STYLE = 'path'
+
+# Object storage (MinIO locally, Cloudflare R2 in production)
+# Variable ke naam MINIO_* hi rakhe hain taake baaqi code na toote.
+AWS_ACCESS_KEY_ID = config('MINIO_ACCESS_KEY', default='')
+AWS_SECRET_ACCESS_KEY = config('MINIO_SECRET_KEY', default='')
+AWS_STORAGE_BUCKET_NAME = config('MINIO_BUCKET_NAME', default='')
+AWS_S3_ENDPOINT_URL = config('MINIO_ENDPOINT_URL', default='')
+AWS_S3_ADDRESSING_STYLE = config('S3_ADDRESSING_STYLE', default='path')
 AWS_DEFAULT_ACL = None
 AWS_QUERYSTRING_AUTH = True
-AWS_S3_USE_SSL = False
-AWS_S3_VERIFY = False
-AWS_DEMOS_BUCKET_NAME = config('MINIO_DEMOS_BUCKET_NAME')
+AWS_S3_USE_SSL = config('S3_USE_SSL', default=False, cast=bool)
+AWS_S3_VERIFY = config('S3_VERIFY', default=False, cast=bool)
+AWS_DEMOS_BUCKET_NAME = config('MINIO_DEMOS_BUCKET_NAME', default='')
+
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
+
+# S3/R2 tab use hoga jab endpoint set ho, warna local filesystem
+_default_storage = (
+    "storages.backends.s3.S3Storage"
+    if AWS_S3_ENDPOINT_URL
+    else "django.core.files.storage.FileSystemStorage"
+)
 
 STORAGES = {
     "default": {
-        "BACKEND": "storages.backends.s3.S3Storage",
+        "BACKEND": _default_storage,
     },
     "staticfiles": {
-        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+        "BACKEND": "whitenoise.storage.CompressedStaticFilesStorage",
     },
 }
 
+
+# CORS / demo origins
 DEMO_ALLOWED_ORIGINS = [
-    'http://localhost:8000',
-    'http://127.0.0.1:8000',
-    'http://localhost:5173',   # React/Vite dev server
+    o for o in config(
+        'DEMO_ALLOWED_ORIGINS',
+        default='http://localhost:8000,http://127.0.0.1:8000,http://localhost:5173',
+    ).split(',') if o
 ]
 
 CORS_ALLOWED_ORIGINS = [
-    'http://localhost:5173',
+    o for o in config(
+        'CORS_ALLOWED_ORIGINS',
+        default='http://localhost:5173',
+    ).split(',') if o
 ]
+
 RATELIMIT_USE_CACHE = 'default'
+
 sentry_sdk.init(
     dsn=config('SENTRY_DSN', default=''),
     integrations=[DjangoIntegration()],
     traces_sample_rate=1.0,
     send_default_pii=False,
-    environment='development',
+    environment=config('SENTRY_ENV', default='development'),
 )
-STATIC_URL = 'static/'
 
-STATIC_ROOT = BASE_DIR / "staticfiles"
+
+# Production security (sirf jab DEBUG=False ho)
 if not DEBUG:
     SECURE_SSL_REDIRECT = True
     SECURE_HSTS_SECONDS = 31536000  # 1 year
