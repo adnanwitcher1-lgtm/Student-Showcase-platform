@@ -57,9 +57,10 @@ class ProjectCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Project
         fields = [
-            'title', 'description', 'category', 'tech_stack',
+            'id', 'slug', 'title', 'description', 'category', 'tech_stack',
             'github_url', 'live_demo_url', 'cover_image', 'demo_file', 'status',
         ]
+        read_only_fields = ['id', 'slug']
 
     def validate_title(self, value):
         if len(value.strip()) < 3:
@@ -142,6 +143,8 @@ class SourceSnippetSerializer(serializers.ModelSerializer):
     class Meta:
         model = SourceSnippet
         fields = ['id', 'filename', 'language', 'content', 'created_at']
+
+
 class StaticSiteUploadSerializer(serializers.Serializer):
     site_zip = serializers.FileField()
 
