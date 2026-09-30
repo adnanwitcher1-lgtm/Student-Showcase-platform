@@ -234,6 +234,8 @@ AWS_DEFAULT_ACL = None
 AWS_QUERYSTRING_AUTH = True
 AWS_S3_USE_SSL = config('S3_USE_SSL', default=False, cast=bool)
 AWS_S3_VERIFY = config('S3_VERIFY', default=False, cast=bool)
+AWS_S3_REGION_NAME = config('S3_REGION_NAME', default='') or None
+AWS_S3_SIGNATURE_VERSION = 's3v4'
 AWS_DEMOS_BUCKET_NAME = config('MINIO_DEMOS_BUCKET_NAME', default='')
 
 MEDIA_URL = '/media/'
