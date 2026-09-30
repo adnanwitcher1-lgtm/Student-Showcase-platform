@@ -23,3 +23,5 @@ sentry-sdk
 django-prometheus
 django-ratelimit
 django-redis
+dj-database-url
+whitenoise
