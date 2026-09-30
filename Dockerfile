@@ -15,8 +15,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-RUN python manage.py collectstatic --noinput --skip-checks || true
+# Windows ke line endings (CRLF) hata do, warna start.sh Linux par nahi chalti
+RUN sed -i 's/\r$//' start.sh && chmod +x start.sh
+
+# Build ke waqt sirf collectstatic chalta hai, is liye dummy SECRET_KEY kaafi hai.
+# Asli SECRET_KEY Render ke environment variables se runtime par aati hai.
+RUN SECRET_KEY=build-only-dummy-key python manage.py collectstatic --noinput --skip-checks
 
 EXPOSE 8000
 
-CMD ["gunicorn", "core.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "3"]
+CMD ["./start.sh"]
