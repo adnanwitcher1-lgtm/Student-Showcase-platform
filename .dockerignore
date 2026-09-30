@@ -1,0 +1,10 @@
+myvenv/
+__pycache__/
+*.pyc
+.env
+.git/
+.gitignore
+media/
+staticfiles/
+node_modules/
+frontend/
