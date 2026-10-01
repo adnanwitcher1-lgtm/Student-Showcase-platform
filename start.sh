@@ -12,6 +12,9 @@ if [ -n "$DJANGO_SUPERUSER_USERNAME" ]; then
   python manage.py createsuperuser --noinput || true
 fi
 
+echo "Starting Celery worker + beat in background..."
+celery -A core worker -B --pool=solo --loglevel=info &
+
 echo "Starting gunicorn on port ${PORT:-8000}..."
 exec gunicorn core.wsgi:application \
   --bind 0.0.0.0:${PORT:-8000} \

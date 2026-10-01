@@ -95,6 +95,14 @@ class ProjectViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(instance)
         data = serializer.data
         data['views_count'] = instance.views_count + pending
+
+        # Likes ka pending delta (Redis) bhi jodo, taake refresh par ginti na ghate
+        likes_pending = int(redis_client.get(f'project:{instance.pk}:likes_delta') or 0)
+        data['likes_count'] = instance.likes_count + likes_pending
+        data['liked'] = bool(
+            request.user.is_authenticated
+            and Like.objects.filter(project=instance, user=request.user).exists()
+        )
         return Response(data)
 
     def perform_create(self, serializer):
