@@ -16,6 +16,7 @@ import dj_database_url
 import sentry_sdk
 from sentry_sdk.integrations.django import DjangoIntegration
 from celery.schedules import crontab
+from botocore.config import Config
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -236,6 +237,17 @@ AWS_S3_USE_SSL = config('S3_USE_SSL', default=False, cast=bool)
 AWS_S3_VERIFY = config('S3_VERIFY', default=False, cast=bool)
 AWS_S3_REGION_NAME = config('S3_REGION_NAME', default='') or None
 AWS_S3_SIGNATURE_VERSION = 's3v4'
+
+# Cloudflare R2 ke saath naye boto3 ke checksum headers masla kar sakte hain,
+# is liye checksum sirf tab jab zaroori ho. Purane boto3 par automatically fallback.
+try:
+    AWS_S3_CLIENT_CONFIG = Config(
+        signature_version='s3v4',
+        request_checksum_calculation='when_required',
+        response_checksum_validation='when_required',
+    )
+except TypeError:
+    AWS_S3_CLIENT_CONFIG = Config(signature_version='s3v4')
 AWS_DEMOS_BUCKET_NAME = config('MINIO_DEMOS_BUCKET_NAME', default='')
 
 MEDIA_URL = '/media/'
@@ -282,6 +294,28 @@ sentry_sdk.init(
     send_default_pii=False,
     environment=config('SENTRY_ENV', default='development'),
 )
+
+
+# Logging: DEBUG=False par Django ka 500 traceback console par nahi aata.
+# Is config se Render ke Logs mein poora error nazar aayega.
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'console': {'class': 'logging.StreamHandler'},
+    },
+    'loggers': {
+        'django.request': {
+            'handlers': ['console'],
+            'level': 'ERROR',
+            'propagate': False,
+        },
+    },
+    'root': {
+        'handlers': ['console'],
+        'level': 'WARNING',
+    },
+}
 
 
 # Production security (sirf jab DEBUG=False ho)
