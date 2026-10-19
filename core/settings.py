@@ -54,6 +54,7 @@ INSTALLED_APPS = [
     'allauth.account',
     'allauth.socialaccount',
     'allauth.socialaccount.providers.github',
+    'allauth.socialaccount.providers.google',
     'django_filters',
     'django_celery_beat',
     'storages',
@@ -182,6 +183,36 @@ AUTHENTICATION_BACKENDS = [
     'allauth.account.auth_backends.AuthenticationBackend',
 ]
 LOGIN_REDIRECT_URL = '/admin/'
+
+
+# ---- Social login (Google + GitHub) ----
+# Keys .env se aati hain. Jis provider ki keys khali hon, uska button website par nazar nahi aata.
+FRONTEND_URL = config('FRONTEND_URL', default='').rstrip('/')  # same domain par khali chhodo
+
+GITHUB_CLIENT_ID = config('GITHUB_CLIENT_ID', default='')
+GITHUB_CLIENT_SECRET = config('GITHUB_CLIENT_SECRET', default='')
+GOOGLE_CLIENT_ID = config('GOOGLE_CLIENT_ID', default='')
+GOOGLE_CLIENT_SECRET = config('GOOGLE_CLIENT_SECRET', default='')
+
+SOCIALACCOUNT_PROVIDERS = {}
+if GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET:
+    SOCIALACCOUNT_PROVIDERS['github'] = {
+        'SCOPE': ['user:email'],
+        'APPS': [{'client_id': GITHUB_CLIENT_ID, 'secret': GITHUB_CLIENT_SECRET, 'key': ''}],
+    }
+if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
+    SOCIALACCOUNT_PROVIDERS['google'] = {
+        'SCOPE': ['profile', 'email'],
+        'AUTH_PARAMS': {'access_type': 'online'},
+        'APPS': [{'client_id': GOOGLE_CLIENT_ID, 'secret': GOOGLE_CLIENT_SECRET, 'key': ''}],
+    }
+
+SOCIALACCOUNT_ADAPTER = 'users.social.SocialAccountAdapter'
+SOCIALACCOUNT_LOGIN_ON_GET = True   # button dabate hi seedha Google/GitHub par jao
+SOCIALACCOUNT_AUTO_SIGNUP = True    # naya user khud ban jaye
+# Same email ka purana account ho to naya banane ki jagah usi se jod do
+SOCIALACCOUNT_EMAIL_AUTHENTICATION = True
+SOCIALACCOUNT_EMAIL_AUTHENTICATION_AUTO_CONNECT = True
 
 
 # Redis (cache + celery)
