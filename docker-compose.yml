@@ -1,68 +1,99 @@
+# VPS deployment: web + db + redis + minio + celery + gateway(nginx + React build)
+# Chalane ka tareeqa: DEPLOY_GUIDE.md dekho.
+# Sirf 2 ports bahar khulte hain: PUBLIC_PORT (website) aur MINIO_PUBLIC_PORT (file storage).
+
+x-app: &app
+  build: .
+  image: student-showcase-backend:latest
+  env_file: .env
+  restart: unless-stopped
+
 services:
   web:
-    build: .
-    command: gunicorn core.wsgi:application --bind 0.0.0.0:8000 --workers 3
-    volumes:
-      - static_volume:/app/staticfiles
-    env_file:
-      - .env.docker
+    <<: *app
+    command: ./docker-start.sh
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_started
-    restart: unless-stopped
+      minio:
+        condition: service_started
+
+  celery_worker:
+    <<: *app
+    command: celery -A core worker -l info --concurrency=2
+    depends_on:
+      - web
+
+  celery_beat:
+    <<: *app
+    command: celery -A core beat -l info
+    depends_on:
+      - web
 
   db:
     image: postgres:16
+    env_file: .env
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    environment:
-      POSTGRES_DB: ${DB_NAME}
-      POSTGRES_USER: ${DB_USER}
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER}"]
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
     restart: unless-stopped
 
   redis:
     image: redis:7-alpine
     restart: unless-stopped
 
-  celery_worker:
-    build: .
-    command: celery -A core worker -l info
-    env_file:
-      - .env.docker
-    depends_on:
-      - db
-      - redis
-    restart: unless-stopped
-
-  celery_beat:
-    build: .
-    command: celery -A core beat -l info
-    env_file:
-      - .env.docker
-    depends_on:
-      - db
-      - redis
-    restart: unless-stopped
-
-  nginx:
-    image: nginx:alpine
-    ports:
-      - "80:80"
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
     volumes:
-      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf
-      - static_volume:/app/staticfiles
+      - minio_data:/data
+    ports:
+      - "${MINIO_PUBLIC_PORT:-9100}:9000"
+    restart: unless-stopped
+
+  # Ek baar chalta hai: dono buckets banata hai aur demos bucket ko public-read karta hai
+  minio_setup:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    environment:
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME}
+      MINIO_DEMOS_BUCKET_NAME: ${MINIO_DEMOS_BUCKET_NAME}
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 $$MINIO_ACCESS_KEY $$MINIO_SECRET_KEY; do echo 'waiting for minio...'; sleep 2; done;
+      mc mb --ignore-existing local/$$MINIO_BUCKET_NAME;
+      mc mb --ignore-existing local/$$MINIO_DEMOS_BUCKET_NAME;
+      mc anonymous set download local/$$MINIO_DEMOS_BUCKET_NAME;
+      echo 'buckets ready';
+      "
+    restart: "no"
+
+  # React build + nginx. API requests Django (web) ko proxy hoti hain.
+  gateway:
+    build:
+      context: ${FRONTEND_DIR:-../Student-Showcase-frontend}
+      args:
+        VITE_API_URL: ${PUBLIC_URL}/api
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "${PUBLIC_PORT:-8100}:80"
     depends_on:
       - web
     restart: unless-stopped
 
 volumes:
   postgres_data:
-  static_volume:
+  minio_data:
