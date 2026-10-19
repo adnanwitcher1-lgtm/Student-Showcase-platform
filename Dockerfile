@@ -16,7 +16,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Windows ke line endings (CRLF) hata do, warna start.sh Linux par nahi chalti
-RUN sed -i 's/\r$//' start.sh && chmod +x start.sh
+RUN sed -i 's/\r$//' start.sh docker-start.sh && chmod +x start.sh docker-start.sh
 
 # Build ke waqt sirf collectstatic chalta hai, is liye dummy SECRET_KEY kaafi hai.
 # Asli SECRET_KEY Render ke environment variables se runtime par aati hai.
