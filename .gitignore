@@ -40,3 +40,6 @@ dist/
 .env.*
 db.sqlite3
 node_modules/
+
+# Deployment template commit hona chahiye
+!deploy.env.example
