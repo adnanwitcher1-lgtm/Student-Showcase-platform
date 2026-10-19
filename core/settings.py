@@ -286,6 +286,9 @@ CORS_ALLOWED_ORIGINS = [
 ]
 
 RATELIMIT_USE_CACHE = 'default'
+# nginx ke peeche asli client IP X-Real-IP header mein aata hai.
+# Isko set na karein to sab users ek hi IP (nginx ka) dikhte hain aur rate limit sab ko ek saath lagti hai.
+RATELIMIT_IP_META_KEY = config('RATELIMIT_IP_META_KEY', default='') or None
 
 sentry_sdk.init(
     dsn=config('SENTRY_DSN', default=''),
@@ -319,11 +322,17 @@ LOGGING = {
 
 
 # Production security (sirf jab DEBUG=False ho)
+# USE_HTTPS=False tab set karo jab site sirf http://IP:PORT par chal rahi ho
+# (domain + SSL lagne ke baad USE_HTTPS=True kar do). Default True hai,
+# is liye Render wala setup bilkul pehle jaisa chalta rahega.
+USE_HTTPS = config('USE_HTTPS', default=True, cast=bool)
+
 if not DEBUG:
-    SECURE_SSL_REDIRECT = True
-    SECURE_HSTS_SECONDS = 31536000  # 1 year
-    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
-    SECURE_HSTS_PRELOAD = True
-    SESSION_COOKIE_SECURE = True
-    CSRF_COOKIE_SECURE = True
-    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    SESSION_COOKIE_SECURE = USE_HTTPS
+    CSRF_COOKIE_SECURE = USE_HTTPS
+    if USE_HTTPS:
+        SECURE_SSL_REDIRECT = True
+        SECURE_HSTS_SECONDS = 31536000  # 1 year
+        SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+        SECURE_HSTS_PRELOAD = True
+        SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
