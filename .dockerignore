@@ -8,3 +8,5 @@ media/
 staticfiles/
 node_modules/
 frontend/
+.env.*
+deploy.env.example
