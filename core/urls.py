@@ -53,7 +53,6 @@ from projects.views import (
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/auth/register/', RegisterView.as_view()),
-    path('api/auth/login/', TokenObtainPairView.as_view()),
     path('api/auth/refresh/', TokenRefreshView.as_view()),
     path('accounts/', include('allauth.urls')),
     path('api/auth/social/providers/', SocialProvidersView.as_view()),
