@@ -19,27 +19,55 @@ class TagSerializer(serializers.ModelSerializer):
         fields = ['id', 'name', 'slug']
 
 
+def _can_see_private(request, project):
+    """Rejection reason sirf project ke owner aur instructor/admin ko dikhta hai."""
+    user = getattr(request, 'user', None)
+    if not user or not user.is_authenticated:
+        return False
+    return project.owner_id == user.id or user.role in ('instructor', 'admin')
+
+
 class ProjectListSerializer(serializers.ModelSerializer):
     owner = serializers.CharField(source='owner.username', read_only=True)
     category = serializers.CharField(source='category.name', read_only=True)
-
-    class Meta:
-        model = Project
-        fields = ['id', 'title', 'slug', 'owner', 'category', 'status', 'views_count', 'likes_count', 'cover_image', 'is_featured']
-
-
-class ProjectDetailSerializer(serializers.ModelSerializer):
-    owner = serializers.CharField(source='owner.username', read_only=True)
-    category = CategorySerializer(read_only=True)
-    tech_stack = TagSerializer(many=True, read_only=True)
+    tech_stack = serializers.SlugRelatedField(many=True, read_only=True, slug_field='name')
+    rejection_reason = serializers.SerializerMethodField()
 
     class Meta:
         model = Project
         fields = [
-            'id', 'title', 'slug', 'owner', 'description', 'category', 'tech_stack',
-            'github_url', 'live_demo_url', 'cover_image', 'status',
-            'views_count', 'likes_count', 'created_at', 'updated_at',
+            'id', 'title', 'slug', 'owner', 'category', 'tech_stack', 'status',
+            'rejection_reason', 'views_count', 'likes_count', 'cover_image', 'is_featured',
         ]
+
+    def get_rejection_reason(self, obj):
+        return obj.rejection_reason if _can_see_private(self.context.get('request'), obj) else ''
+
+
+class ScreenshotReadSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ProjectScreenshot
+        fields = ['id', 'image']
+
+
+class ProjectDetailSerializer(serializers.ModelSerializer):
+    owner = serializers.CharField(source='owner.username', read_only=True)
+    owner_batch = serializers.CharField(source='owner.batch', read_only=True)
+    category = CategorySerializer(read_only=True)
+    tech_stack = TagSerializer(many=True, read_only=True)
+    screenshots = ScreenshotReadSerializer(many=True, read_only=True)
+    rejection_reason = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Project
+        fields = [
+            'id', 'title', 'slug', 'owner', 'owner_batch', 'description', 'category', 'tech_stack',
+            'github_url', 'live_demo_url', 'cover_image', 'screenshots', 'status', 'is_featured',
+            'rejection_reason', 'views_count', 'likes_count', 'created_at', 'updated_at',
+        ]
+
+    def get_rejection_reason(self, obj):
+        return obj.rejection_reason if _can_see_private(self.context.get('request'), obj) else ''
 
 
 class PublicProjectSerializer(serializers.ModelSerializer):
@@ -60,7 +88,9 @@ class ProjectCreateSerializer(serializers.ModelSerializer):
             'id', 'slug', 'title', 'description', 'category', 'tech_stack',
             'github_url', 'live_demo_url', 'cover_image', 'demo_file', 'status',
         ]
-        read_only_fields = ['id', 'slug']
+        # SECURITY: status sirf workflow actions (submit/approve/reject) se badalta hai.
+        # Pehle owner PATCH karke khud apna project 'approved' kar sakta tha.
+        read_only_fields = ['id', 'slug', 'status']
 
     def validate_title(self, value):
         if len(value.strip()) < 3:
