@@ -32,9 +32,18 @@ def deploy_static_site(project_id, staging_key):
     )
 
     uploaded_count = 0
+    MAX_FILES = 500
+    MAX_TOTAL_BYTES = 100 * 1024 * 1024  # zip bomb se bachne ke liye (unzipped size)
     with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
-        for name in zf.namelist():
-            if name.endswith('/'):
+        infos = [i for i in zf.infolist() if not i.filename.endswith('/')]
+        if len(infos) > MAX_FILES or sum(i.file_size for i in infos) > MAX_TOTAL_BYTES:
+            default_storage.delete(staging_key)
+            return f"Rejected zip for project {project_id}: too many files or too large when unzipped."
+
+        for info in infos:
+            name = info.filename
+            # Path traversal (../ ya absolute path) wali files skip karo
+            if name.startswith('/') or '..' in name.split('/') or '\\' in name:
                 continue
             file_data = zf.read(name)
             content_type, _ = mimetypes.guess_type(name)
