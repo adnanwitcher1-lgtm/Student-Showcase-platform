@@ -29,6 +29,7 @@ from projects.views import (
     CommentListCreateView, CommentDeleteView,
     ProjectGitHubMetaView, ProjectDemoUrlView,
     ProjectSourcePreviewView,
+    FilterOptionsView,
 )
 from projects.views import ProjectViewSet, ProjectScreenshotUploadView, CommentListCreateView, CommentDeleteView
 
@@ -67,6 +68,7 @@ urlpatterns = [
     path('api/projects/<slug:slug>/source-preview/', ProjectSourcePreviewView.as_view()),
     path('api/projects/<slug:slug>/static-site/', StaticSiteUploadView.as_view()),
     path('api/projects/<slug:slug>/static-site-url/', StaticSiteStatusView.as_view()),
+    path('api/filter-options/', FilterOptionsView.as_view()),
     path('api/dashboard/stats/', DashboardStatsView.as_view()),
     path('api/auth/login/', RateLimitedTokenObtainPairView.as_view()),
     path('api/sentry-test/', SentryTestView.as_view()),
