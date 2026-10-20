@@ -17,7 +17,7 @@ from django.conf import settings
 from django.shortcuts import get_object_or_404
 
 from github_integration.models import GitHubMeta
-from .models import Project, ProjectScreenshot, Like, Comment, SourceSnippet, ProjectView
+from .models import Project, ProjectScreenshot, Like, Comment, SourceSnippet, ProjectView, Bookmark, Category, Tag
 from .serializers import (
     ProjectListSerializer,
     ProjectDetailSerializer,
@@ -43,12 +43,46 @@ class ProjectViewSet(viewsets.ModelViewSet):
     parser_classes = [MultiPartParser, FormParser, JSONParser]
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_class = ProjectFilter
-    ordering_fields = ['likes_count', 'views_count', 'created_at']
+    ordering_fields = ['likes_count', 'views_count', 'created_at', 'is_featured']
+
+    def _is_staff_role(self):
+        user = self.request.user
+        return user.is_authenticated and user.role in ('instructor', 'admin')
 
     def get_queryset(self):
-        queryset = Project.objects.all().order_by('-created_at')
-        search = self.request.query_params.get('search')
+        """
+        Visibility rules (Day 10 workflow):
+        - Explore/list: sirf APPROVED projects (pehle draft/submitted bhi sab ko nazar aate thay)
+        - ?mine=true: user ke apne saare projects (draft/submitted/rejected sab)
+        - ?bookmarked=true: user ke bookmarks
+        - Instructor/admin: ?status=submitted wagera se kuch bhi dekh sakte hain
+        - Detail/actions: approved ya apna project; instructor/admin ko sab
+        """
+        user = self.request.user
+        params = self.request.query_params
+        queryset = (
+            Project.objects
+            .select_related('owner', 'category')
+            .prefetch_related('tech_stack', 'screenshots')
+            .order_by('-created_at')
+        )
 
+        if self.action == 'list':
+            if params.get('mine') == 'true' and user.is_authenticated:
+                queryset = queryset.filter(owner=user)
+            elif params.get('bookmarked') == 'true' and user.is_authenticated:
+                queryset = queryset.filter(bookmarks__user=user).filter(
+                    Q(status=Project.Status.APPROVED) | Q(owner=user)
+                )
+            elif not (self._is_staff_role() and params.get('status')):
+                queryset = queryset.filter(status=Project.Status.APPROVED)
+        elif not self._is_staff_role():
+            if user.is_authenticated:
+                queryset = queryset.filter(Q(status=Project.Status.APPROVED) | Q(owner=user))
+            else:
+                queryset = queryset.filter(status=Project.Status.APPROVED)
+
+        search = params.get('search')
         if search:
             queryset = queryset.filter(
                 Q(title__icontains=search) |
@@ -59,14 +93,19 @@ class ProjectViewSet(viewsets.ModelViewSet):
         return queryset
 
     def list(self, request, *args, **kwargs):
-        cache_key = f"project_list:{request.query_params.urlencode()}"
-        cached_response = cache.get(cache_key)
+        params = request.query_params
+        # User-specific lists (mine/bookmarked/status) kabhi cache nahi hoti, warna ek user ka data dusre ko mil jata
+        cacheable = not any(k in params for k in ('mine', 'bookmarked', 'status'))
+        cache_key = f"project_list:{params.urlencode()}"
 
-        if cached_response is not None:
-            return Response(cached_response)
+        if cacheable:
+            cached_response = cache.get(cache_key)
+            if cached_response is not None:
+                return Response(cached_response)
 
         response = super().list(request, *args, **kwargs)
-        cache.set(cache_key, response.data, timeout=60)
+        if cacheable:
+            cache.set(cache_key, response.data, timeout=60)
 
         return response
 
@@ -103,6 +142,10 @@ class ProjectViewSet(viewsets.ModelViewSet):
             request.user.is_authenticated
             and Like.objects.filter(project=instance, user=request.user).exists()
         )
+        data['bookmarked'] = bool(
+            request.user.is_authenticated
+            and Bookmark.objects.filter(project=instance, user=request.user).exists()
+        )
         return Response(data)
 
     def perform_create(self, serializer):
@@ -118,9 +161,9 @@ class ProjectViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        if project.status != Project.Status.DRAFT:
+        if project.status not in (Project.Status.DRAFT, Project.Status.REJECTED):
             return Response(
-                {"detail": "Only draft projects can be submitted."},
+                {"detail": "Only draft or rejected projects can be submitted."},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
@@ -217,6 +260,17 @@ class ProjectViewSet(viewsets.ModelViewSet):
         project.save(update_fields=['is_featured'])
         cache.clear()
         return Response({"detail": "Feature status updated.", "is_featured": project.is_featured})
+
+    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
+    def bookmark(self, request, slug=None):
+        project = self.get_object()
+        _, created = Bookmark.objects.get_or_create(project=project, user=request.user)
+        if not created:
+            Bookmark.objects.filter(project=project, user=request.user).delete()
+        return Response({
+            "detail": "Project bookmarked." if created else "Bookmark removed.",
+            "bookmarked": created,
+        })
 
 
 class ProjectGitHubMetaView(APIView):
@@ -426,3 +480,22 @@ class SentryTestView(APIView):
     def get(self, request):
         1 / 0
         return Response({"detail": "This should never be reached."})
+
+
+class FilterOptionsView(APIView):
+    """Explore filters aur upload wizard ke dropdowns ke liye options."""
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        batches = (
+            Project.objects.filter(status=Project.Status.APPROVED)
+            .exclude(owner__batch='')
+            .values_list('owner__batch', flat=True)
+            .distinct()
+            .order_by('owner__batch')
+        )
+        return Response({
+            "categories": list(Category.objects.order_by('name').values('id', 'name', 'slug')),
+            "tech_stack": list(Tag.objects.order_by('name').values('id', 'name', 'slug')),
+            "batches": list(batches),
+        })
