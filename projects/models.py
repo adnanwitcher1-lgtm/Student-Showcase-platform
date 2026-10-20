@@ -124,6 +124,26 @@ class Like(models.Model):
         return f"{self.user.username} likes {self.project.title}"
 
 
+class Bookmark(models.Model):
+    project = models.ForeignKey(
+        Project,
+        on_delete=models.CASCADE,
+        related_name='bookmarks'
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='bookmarked_projects'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('project', 'user')
+
+    def __str__(self):
+        return f"{self.user.username} bookmarked {self.project.title}"
+
+
 class Comment(models.Model):
     project = models.ForeignKey(
         Project,
