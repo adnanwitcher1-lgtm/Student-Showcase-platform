@@ -22,7 +22,10 @@ from users.views import RegisterView
 from engagement.views import DashboardStatsView
 from projects.views import SentryTestView
 from users.views import ProfileView
-from users.social import SocialProvidersView, social_complete
+from users.social import (
+    SocialProvidersView, social_complete,
+    social_desktop_complete, DesktopExchangeView,
+)
 from rest_framework.routers import DefaultRouter
 from projects.views import (
     ProjectViewSet, ProjectScreenshotUploadView,
@@ -58,6 +61,8 @@ urlpatterns = [
     path('accounts/', include('allauth.urls')),
     path('api/auth/social/providers/', SocialProvidersView.as_view()),
     path('api/auth/social/complete/', social_complete),
+    path('api/auth/social/desktop-complete/', social_desktop_complete),
+    path('api/auth/social/desktop-exchange/', DesktopExchangeView.as_view()),
     path('api/users/me/', ProfileView.as_view()),
     path('api/', include(router.urls)),
     path('api/projects/<slug:slug>/screenshots/', ProjectScreenshotUploadView.as_view()),
