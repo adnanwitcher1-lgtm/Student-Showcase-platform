@@ -91,7 +91,7 @@ def _desktop_page(title, message, link=None, status=200):
     if link:
         safe = escape(link, quote=True)
         refresh = f'<meta http-equiv="refresh" content="0;url={safe}">'
-        button = f'<a class="btn" href="{safe}">Student Showcase kholo</a>'
+        button = f'<a class="btn" href="{safe}">Open Student Showcase</a>'
     html = f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -118,8 +118,8 @@ def social_desktop_complete(request):
     if not request.user.is_authenticated or not _CHALLENGE_RE.match(challenge):
         logout(request)
         return _desktop_page(
-            'Login nahi ho saka',
-            'Desktop app se dobara try karo.',
+            'Sign-in failed',
+            'Please return to the desktop app and try again.',
             status=400,
         )
 
@@ -134,8 +134,8 @@ def social_desktop_complete(request):
     logout(request)
 
     return _desktop_page(
-        'Login ho gaya',
-        'Student Showcase desktop app khul jayegi. Na khule to neeche button dabao, phir ye tab band kar do.',
+        'Sign-in successful',
+        'The Student Showcase desktop app should open automatically. If it does not, select the button below, then you may close this tab.',
         link=f'{DESKTOP_SCHEME}://auth?code={code}',
     )
 
