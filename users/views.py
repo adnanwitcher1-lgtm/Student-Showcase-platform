@@ -1,3 +1,4 @@
+from .authentication import DeviceAwareTokenObtainPairSerializer
 from django.shortcuts import render
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework import generics, permissions
@@ -28,4 +29,4 @@ class RegisterView(generics.CreateAPIView):
     name='post'
 )
 class RateLimitedTokenObtainPairView(TokenObtainPairView):
-    pass
+    serializer_class = DeviceAwareTokenObtainPairSerializer
