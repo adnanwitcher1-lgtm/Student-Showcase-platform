@@ -19,6 +19,16 @@ class TagSerializer(serializers.ModelSerializer):
         fields = ['id', 'name', 'slug']
 
 
+def _avatar_url(user, request):
+    if not user.avatar:
+        return None
+    try:
+        url = user.avatar.url
+    except Exception:
+        return None
+    return request.build_absolute_uri(url) if request and url.startswith('/') else url
+
+
 def _can_see_private(request, project):
     """Rejection reason sirf project ke owner aur instructor/admin ko dikhta hai."""
     user = getattr(request, 'user', None)
@@ -31,14 +41,23 @@ class ProjectListSerializer(serializers.ModelSerializer):
     owner = serializers.CharField(source='owner.username', read_only=True)
     category = serializers.CharField(source='category.name', read_only=True)
     tech_stack = serializers.SlugRelatedField(many=True, read_only=True, slug_field='name')
+    owner_avatar = serializers.SerializerMethodField()
+    has_video = serializers.SerializerMethodField()
     rejection_reason = serializers.SerializerMethodField()
 
     class Meta:
         model = Project
         fields = [
-            'id', 'title', 'slug', 'owner', 'category', 'tech_stack', 'status',
+            'id', 'title', 'slug', 'owner', 'owner_avatar', 'category', 'tech_stack', 'status',
             'rejection_reason', 'views_count', 'likes_count', 'cover_image', 'is_featured',
+            'has_video', 'created_at',
         ]
+
+    def get_owner_avatar(self, obj):
+        return _avatar_url(obj.owner, self.context.get('request'))
+
+    def get_has_video(self, obj):
+        return bool(obj.demo_video)
 
     def get_rejection_reason(self, obj):
         return obj.rejection_reason if _can_see_private(self.context.get('request'), obj) else ''
@@ -53,6 +72,10 @@ class ScreenshotReadSerializer(serializers.ModelSerializer):
 class ProjectDetailSerializer(serializers.ModelSerializer):
     owner = serializers.CharField(source='owner.username', read_only=True)
     owner_batch = serializers.CharField(source='owner.batch', read_only=True)
+    owner_avatar = serializers.SerializerMethodField()
+    owner_bio = serializers.CharField(source='owner.bio', read_only=True)
+    owner_github = serializers.CharField(source='owner.github_username', read_only=True)
+    demo_video = serializers.SerializerMethodField()
     category = CategorySerializer(read_only=True)
     tech_stack = TagSerializer(many=True, read_only=True)
     screenshots = ScreenshotReadSerializer(many=True, read_only=True)
@@ -61,13 +84,25 @@ class ProjectDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model = Project
         fields = [
-            'id', 'title', 'slug', 'owner', 'owner_batch', 'description', 'category', 'tech_stack',
+            'id', 'title', 'slug', 'owner', 'owner_batch', 'owner_avatar', 'owner_bio', 'owner_github',
+            'description', 'category', 'tech_stack', 'demo_video',
             'github_url', 'live_demo_url', 'cover_image', 'screenshots', 'status', 'is_featured',
             'rejection_reason', 'views_count', 'likes_count', 'created_at', 'updated_at',
         ]
 
     def get_rejection_reason(self, obj):
         return obj.rejection_reason if _can_see_private(self.context.get('request'), obj) else ''
+
+    def get_owner_avatar(self, obj):
+        return _avatar_url(obj.owner, self.context.get('request'))
+
+    def get_demo_video(self, obj):
+        if not obj.demo_video:
+            return None
+        try:
+            return obj.demo_video.url
+        except Exception:
+            return None
 
 
 class PublicProjectSerializer(serializers.ModelSerializer):
@@ -86,7 +121,7 @@ class ProjectCreateSerializer(serializers.ModelSerializer):
         model = Project
         fields = [
             'id', 'slug', 'title', 'description', 'category', 'tech_stack',
-            'github_url', 'live_demo_url', 'cover_image', 'demo_file', 'status',
+            'github_url', 'live_demo_url', 'cover_image', 'demo_file', 'demo_video', 'status',
         ]
         # SECURITY: status sirf workflow actions (submit/approve/reject) se badalta hai.
         # Pehle owner PATCH karke khud apna project 'approved' kar sakta tha.
@@ -103,6 +138,20 @@ class ProjectCreateSerializer(serializers.ModelSerializer):
         pattern = r"^https://github\.com/[\w-]+/[\w.-]+/?$"
         if not re.match(pattern, value):
             raise serializers.ValidationError("Enter a valid GitHub repository URL, e.g. https://github.com/username/repo")
+        return value
+
+    def validate_demo_video(self, value):
+        if not value:
+            return value
+        max_mb = 100
+        if value.size > max_mb * 1024 * 1024:
+            raise serializers.ValidationError(f"Video cannot exceed {max_mb} MB.")
+        ext = value.name.rsplit('.', 1)[-1].lower() if '.' in value.name else ''
+        if ext not in ('mp4', 'webm', 'mov'):
+            raise serializers.ValidationError("Video must be an MP4, WebM or MOV file.")
+        ctype = getattr(value, 'content_type', '') or ''
+        if ctype and not ctype.startswith('video/'):
+            raise serializers.ValidationError("File content does not look like a video.")
         return value
 
     def validate_live_demo_url(self, value):
@@ -173,6 +222,19 @@ class SourceSnippetSerializer(serializers.ModelSerializer):
     class Meta:
         model = SourceSnippet
         fields = ['id', 'filename', 'language', 'content', 'created_at']
+
+    def validate_filename(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("File name is required.")
+        return value
+
+    def validate_content(self, value):
+        if not value.strip():
+            raise serializers.ValidationError("Code cannot be empty.")
+        if len(value) > 20000:
+            raise serializers.ValidationError("Code cannot exceed 20000 characters.")
+        return value
 
 
 class StaticSiteUploadSerializer(serializers.Serializer):
