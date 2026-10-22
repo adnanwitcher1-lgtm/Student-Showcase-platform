@@ -31,8 +31,8 @@ from projects.views import (
     ProjectViewSet, ProjectScreenshotUploadView,
     CommentListCreateView, CommentDeleteView,
     ProjectGitHubMetaView, ProjectDemoUrlView,
-    ProjectSourcePreviewView,
-    FilterOptionsView,
+    ProjectSourcePreviewView, ProjectSourceSnippetDeleteView, ProjectSourceImportView,
+    FilterOptionsView, MyStatsView, LeaderboardView,
 )
 from projects.views import ProjectViewSet, ProjectScreenshotUploadView, CommentListCreateView, CommentDeleteView
 
@@ -71,9 +71,13 @@ urlpatterns = [
     path('api/projects/<slug:slug>/github-meta/', ProjectGitHubMetaView.as_view()),
     path('api/projects/<slug:slug>/demo-url/', ProjectDemoUrlView.as_view()),
     path('api/projects/<slug:slug>/source-preview/', ProjectSourcePreviewView.as_view()),
+    path('api/projects/<slug:slug>/source-preview/<int:snippet_id>/', ProjectSourceSnippetDeleteView.as_view()),
+    path('api/projects/<slug:slug>/source-import/', ProjectSourceImportView.as_view()),
     path('api/projects/<slug:slug>/static-site/', StaticSiteUploadView.as_view()),
     path('api/projects/<slug:slug>/static-site-url/', StaticSiteStatusView.as_view()),
     path('api/filter-options/', FilterOptionsView.as_view()),
+    path('api/users/me/stats/', MyStatsView.as_view()),
+    path('api/leaderboard/', LeaderboardView.as_view()),
     path('api/dashboard/stats/', DashboardStatsView.as_view()),
     path('api/auth/login/', RateLimitedTokenObtainPairView.as_view()),
     path('api/sentry-test/', SentryTestView.as_view()),
