@@ -56,6 +56,7 @@ class Project(models.Model):
     live_demo_url = models.URLField(blank=True)
     cover_image = models.ImageField(upload_to='project_covers/', blank=True, null=True)
     demo_file = models.FileField(upload_to='project_demos/', blank=True, null=True)
+    demo_video = models.FileField(upload_to='project_videos/', blank=True, null=True)
     static_site_url = models.URLField(blank=True)
     is_featured = models.BooleanField(default=False)
     status = models.CharField(
