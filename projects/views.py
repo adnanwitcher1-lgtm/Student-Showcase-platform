@@ -15,6 +15,7 @@ import boto3
 from botocore.config import Config
 from django.conf import settings
 from django.shortcuts import get_object_or_404
+from django.http import Http404
 
 from github_integration.models import GitHubMeta
 from .models import Project, ProjectScreenshot, Like, Comment, SourceSnippet, ProjectView, Bookmark, Category, Tag
@@ -33,6 +34,18 @@ from .permissions import IsOwnerOrReadOnly, IsInstructorOrAdmin
 from .filters import ProjectFilter
 from .tasks import watermark_screenshot, deploy_static_site
 from .redis_utils import redis_client
+from github_integration.github_client import fetch_repo_source
+
+
+def visible_project_or_404(request, slug):
+    """Approved project sab ko; baaki sirf owner aur instructor/admin ko. Warna 404."""
+    project = get_object_or_404(Project, slug=slug)
+    if project.status == Project.Status.APPROVED:
+        return project
+    user = request.user
+    if user.is_authenticated and (project.owner_id == user.id or user.role in ('instructor', 'admin')):
+        return project
+    raise Http404
 
 
 @method_decorator(ratelimit(key='user', rate='10/h', method='POST', block=True), name='create')
@@ -277,7 +290,7 @@ class ProjectGitHubMetaView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def get(self, request, slug):
-        project = get_object_or_404(Project, slug=slug)
+        project = visible_project_or_404(request, slug)
 
         try:
             meta = project.github_meta
@@ -298,7 +311,7 @@ class ProjectDemoUrlView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def get(self, request, slug):
-        project = get_object_or_404(Project, slug=slug)
+        project = visible_project_or_404(request, slug)
 
         if not project.demo_file:
             return Response(
@@ -358,7 +371,7 @@ class StaticSiteStatusView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def get(self, request, slug):
-        project = get_object_or_404(Project, slug=slug)
+        project = visible_project_or_404(request, slug)
         if not project.static_site_url:
             return Response({"detail": "No static site deployed yet."}, status=status.HTTP_404_NOT_FOUND)
         return Response({"site_url": project.static_site_url})
@@ -419,15 +432,11 @@ class CommentListCreateView(generics.ListCreateAPIView):
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
 
     def get_queryset(self):
-        return Comment.objects.filter(
-            project__slug=self.kwargs['slug']
-        )
+        project = visible_project_or_404(self.request, self.kwargs['slug'])
+        return Comment.objects.filter(project=project)
 
     def perform_create(self, serializer):
-        project = get_object_or_404(
-            Project,
-            slug=self.kwargs['slug']
-        )
+        project = visible_project_or_404(self.request, self.kwargs['slug'])
 
         serializer.save(
             project=project,
@@ -462,16 +471,70 @@ class CommentDeleteView(APIView):
 
 
 class ProjectSourcePreviewView(APIView):
-    permission_classes = [permissions.AllowAny]
+    """GET: source snippets (approved ya owner/staff). POST: owner naya snippet jodta hai."""
+    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
 
     def get(self, request, slug):
-        project = get_object_or_404(Project, slug=slug)
-        snippets = SourceSnippet.objects.filter(project=project)
-        serializer = SourceSnippetSerializer(snippets, many=True)
+        project = visible_project_or_404(request, slug)
+        snippets = SourceSnippet.objects.filter(project=project).order_by('id')
+        return Response(SourceSnippetSerializer(snippets, many=True).data)
 
-        response = Response(serializer.data)
-        response['Content-Disposition'] = 'inline'
-        return response
+    def post(self, request, slug):
+        project = visible_project_or_404(request, slug)
+        if project.owner_id != request.user.id:
+            return Response({"detail": "You do not own this project."}, status=status.HTTP_403_FORBIDDEN)
+        if SourceSnippet.objects.filter(project=project).count() >= 30:
+            return Response({"detail": "A project can have at most 30 source files."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        serializer = SourceSnippetSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save(project=project)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class ProjectSourceSnippetDeleteView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def delete(self, request, slug, snippet_id):
+        project = visible_project_or_404(request, slug)
+        if project.owner_id != request.user.id and request.user.role not in ('instructor', 'admin'):
+            return Response({"detail": "You do not own this project."}, status=status.HTTP_403_FORBIDDEN)
+        get_object_or_404(SourceSnippet, id=snippet_id, project=project).delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@method_decorator(ratelimit(key='user_or_ip', rate='6/m', method='POST', block=True), name='post')
+class ProjectSourceImportView(APIView):
+    """Owner ke GitHub repo se chhoti source files import karta hai (purani snippets replace)."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, slug):
+        project = visible_project_or_404(request, slug)
+        if project.owner_id != request.user.id:
+            return Response({"detail": "You do not own this project."}, status=status.HTTP_403_FORBIDDEN)
+        if not project.github_url:
+            return Response({"detail": "Add a GitHub repository link to this project first."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        parts = project.github_url.rstrip('/').split('/')
+        try:
+            files = fetch_repo_source(parts[-2], parts[-1])
+        except Exception:
+            return Response(
+                {"detail": "Could not read the GitHub repository. Make sure it is public and the link is correct."},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+        if not files:
+            return Response({"detail": "No suitable source files were found in the repository."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        SourceSnippet.objects.filter(project=project).delete()
+        SourceSnippet.objects.bulk_create([
+            SourceSnippet(project=project, filename=path[:255], language=lang, content=text)
+            for path, lang, text in files
+        ])
+        snippets = SourceSnippet.objects.filter(project=project).order_by('id')
+        return Response(SourceSnippetSerializer(snippets, many=True).data, status=status.HTTP_201_CREATED)
 
 
 class SentryTestView(APIView):
@@ -499,3 +562,58 @@ class FilterOptionsView(APIView):
             "tech_stack": list(Tag.objects.order_by('name').values('id', 'name', 'slug')),
             "batches": list(batches),
         })
+
+
+class MyStatsView(APIView):
+    """Logged-in user ke apne projects ke numbers (My Space / sidebar ke liye)."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        mine = Project.objects.filter(owner=request.user)
+        by_status = {s: 0 for s in ('draft', 'submitted', 'approved', 'rejected')}
+        for row in mine.values('status').annotate(n=models.Count('id')):
+            by_status[row['status']] = row['n']
+        totals = mine.aggregate(views=models.Sum('views_count'), likes=models.Sum('likes_count'))
+        return Response({
+            "projects": mine.count(),
+            "by_status": by_status,
+            "total_views": totals['views'] or 0,
+            "total_likes": totals['likes'] or 0,
+            "bookmarks_saved": Bookmark.objects.filter(user=request.user).count(),
+            "bookmarks_received": Bookmark.objects.filter(project__owner=request.user).count(),
+        })
+
+
+class LeaderboardView(APIView):
+    """Top creators: sirf approved projects ginte hain."""
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        rows = (
+            Project.objects.filter(status=Project.Status.APPROVED)
+            .values('owner')
+            .annotate(
+                projects=models.Count('id'),
+                likes=models.Sum('likes_count'),
+                views=models.Sum('views_count'),
+            )
+            .order_by('-likes', '-views', '-projects')[:20]
+        )
+        from django.contrib.auth import get_user_model
+        users = {u.id: u for u in get_user_model().objects.filter(id__in=[r['owner'] for r in rows])}
+        data = []
+        for rank, r in enumerate(rows, start=1):
+            u = users.get(r['owner'])
+            if not u:
+                continue
+            avatar = None
+            if u.avatar:
+                try:
+                    avatar = u.avatar.url
+                except Exception:
+                    avatar = None
+            data.append({
+                "rank": rank, "username": u.username, "avatar": avatar, "batch": u.batch,
+                "projects": r['projects'], "likes": r['likes'] or 0, "views": r['views'] or 0,
+            })
+        return Response(data)
